@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context-Aware Support Agent</title>
+<style>
+  :root{--bg:#f5f6fa;--card:#fff;--ink:#1d2433;--mute:#6b7488;--line:#e3e6ee;--brand:#4f46e5;--brand2:#eef0ff;
+        --open:#d97706;--prog:#2563eb;--esc:#dc2626;--ok:#16a34a;}
+  *{box-sizing:border-box} body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  header{display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--card);border-bottom:1px solid var(--line)}
+  header h1{font-size:16px;margin:0;flex:1} .pill{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--brand2);color:var(--brand)}
+  main{display:grid;grid-template-columns:minmax(320px,420px) 1fr;gap:16px;padding:16px;max-width:1300px;margin:auto}
+  @media(max-width:900px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:16px}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin:0 0 10px}
+  input,select,textarea,button{font:inherit} input,select,textarea{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;margin-bottom:8px}
+  textarea{resize:vertical;min-height:54px}
+  button{padding:8px 12px;border:0;border-radius:8px;background:var(--brand);color:#fff;cursor:pointer}
+  button.ghost{background:var(--brand2);color:var(--brand)} button.small{padding:4px 8px;font-size:12px} button:disabled{opacity:.5;cursor:default}
+  .row{display:flex;gap:8px}.row>*{flex:1} .muted{color:var(--mute)} .tiny{font-size:12px}
+  .badge{display:inline-block;font-size:11px;padding:1px 8px;border-radius:99px;color:#fff;background:var(--mute)}
+  .open{background:var(--open)}.in_progress{background:var(--prog)}.escalated{background:var(--esc)}.resolved,.closed{background:var(--ok)}
+  .issue{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px}
+  .issue h3{font-size:14px;margin:0 0 4px}
+  .attempt{font-size:12px;padding:4px 8px;margin:4px 0;border-left:3px solid var(--line);background:#fafbfd}
+  .attempt.failed{border-color:var(--esc)}.attempt.worked{border-color:var(--ok)}.attempt.pending{border-color:var(--open)}
+  details summary{cursor:pointer;color:var(--brand);font-size:12px;margin-top:6px}
+  #chat{height:360px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px;background:#fafbfd;margin-bottom:8px}
+  .msg{max-width:85%;padding:8px 12px;border-radius:12px;margin:6px 0;white-space:pre-wrap}
+  .msg.user{background:var(--brand);color:#fff;margin-left:auto}.msg.assistant{background:#fff;border:1px solid var(--line)}
+  .sys{text-align:center;color:var(--mute);font-size:12px;margin:8px 0}
+  .chain{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:8px 0}
+  .node{padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:#fff;font-size:12px}
+  .node b{display:block;font-size:10px;text-transform:uppercase;color:var(--mute);letter-spacing:.04em}
+  .arrow{color:var(--mute)} #toast{position:fixed;bottom:16px;right:16px;background:#1d2433;color:#fff;padding:10px 14px;border-radius:8px;display:none;max-width:360px}
+</style>
+</head>
+<body>
+<header>
+  <h1>🧠 Context-Aware Support Agent <span class="muted tiny">Flask · Neo4j</span></h1>
+  <span class="pill" id="mode">checking…</span>
+  <button class="ghost small" id="seedBtn">Load demo data</button>
+</header>
+
+<main>
+  <section>
+    <div class="card">
+      <h2>Customer</h2>
+      <select id="customerSelect"></select>
+      <details><summary>+ New customer</summary>
+        <div style="margin-top:8px">
+          <input id="newName" placeholder="Full name"><input id="newEmail" placeholder="Email">
+          <button class="small" id="addCustomer">Create customer</button>
+        </div>
+      </details>
+    </div>
+
+    <div class="card" id="productsCard">
+      <h2>Products owned</h2>
+      <div id="products" class="tiny muted">Select a customer</div>
+      <div class="row" style="margin-top:8px"><input id="prodName" placeholder="Product name"><input id="prodCat" placeholder="Category (account, billing, device…)"></div>
+      <button class="small ghost" id="addProduct">Add product</button>
+    </div>
+
+    <div class="card">
+      <h2>1 · Report an issue</h2>
+      <select id="issueProduct"></select>
+      <input id="issueTitle" placeholder="Short title, e.g. Cannot log in">
+      <textarea id="issueDesc" placeholder="What is happening?"></textarea>
+      <div class="row">
+        <select id="issuePriority"><option>medium</option><option>low</option><option>high</option><option>urgent</option></select>
+        <button id="reportBtn">Create issue + ticket</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Tickets &amp; attempted resolutions</h2>
+      <div id="issues" class="muted tiny">Select a customer</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <h2>2 · Chat with the agent</h2>
+      <div id="chat"></div>
+      <div class="row">
+        <input id="msg" placeholder='Try: "My account still isn&#39;t working"' style="margin:0;flex:4">
+        <button id="sendBtn" style="flex:1">Send</button>
+      </div>
+      <div style="margin-top:8px"><button class="ghost small" id="newConv">Start new conversation</button>
+        <span class="muted tiny" id="convInfo"></span></div>
+    </div>
+
+    <div class="card">
+      <h2>3 · Memory the agent retrieved from Neo4j</h2>
+      <div id="memory" class="muted tiny">Send a message to see which history was retrieved.</div>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let customerId = null, conversationId = null, products = [];
+
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v);
+  }
+  kids.flat().forEach(c => { if (c != null) el.append(c.nodeType ? c : document.createTextNode(c)); });
+  return el;
+}
+async function api(path, opts = {}) {
+  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 3500); }
+const guard = fn => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message); } };
+const badge = s => h('span', { class: 'badge ' + s }, s.replace('_', ' '));
+const day = s => (s || '').slice(0, 10);
+
+async function loadHealth() {
+  try { const d = await api('/api/health'); $('#mode').textContent = d.llm ? 'Claude replies' : 'rule-based replies (no API key)'; }
+  catch { $('#mode').textContent = 'Neo4j unreachable'; }
+}
+async function loadCustomers(selectId) {
+  const list = await api('/api/customers');
+  const sel = $('#customerSelect'); sel.replaceChildren(h('option', { value: '' }, '— select customer —'));
+  list.forEach(c => sel.append(h('option', { value: c.id }, `${c.name} (${c.email})`)));
+  if (selectId) sel.value = selectId;
+  await selectCustomer(sel.value || null);
+}
+async function selectCustomer(id) {
+  customerId = id; resetChat();
+  if (!id) { $('#products').textContent = 'Select a customer'; $('#issues').textContent = 'Select a customer'; products = []; fillProducts(); return; }
+  await refreshHistory();
+}
+function fillProducts() {
+  $('#issueProduct').replaceChildren(...products.map(p => h('option', { value: p.id }, p.name)));
+  $('#products').replaceChildren(products.length ? products.map(p => h('div', {}, '• ', p.name, p.category ? ` (${p.category})` : '')) : 'No products yet');
+}
+async function refreshHistory() {
+  const d = await api(`/api/customers/${customerId}/history`);
+  products = d.products; fillProducts();
+  const box = $('#issues');
+  if (!d.issues.length) { box.textContent = 'No issues yet.'; return; }
+  box.replaceChildren(...d.issues.map(renderIssue));
+}
+function renderIssue(e) {
+  const i = e.issue, t = e.ticket || {};
+  const attempts = e.resolutions.map(r => h('div', { class: 'attempt ' + r.outcome }, `${r.description} — `, h('b', {}, r.outcome)));
+  const desc = h('input', { placeholder: 'Attempted step, e.g. Re-sent verification email' });
+  const outcome = h('select', {}, ...['failed', 'worked', 'pending'].map(o => h('option', {}, o)));
+  return h('div', { class: 'issue' },
+    h('h3', {}, i.title), h('div', { class: 'tiny muted' }, `${(e.product || {}).name || ''} · ${t.number} · ${t.priority} · ${day(i.createdAt)} `, badge(i.status)),
+    i.description ? h('div', { class: 'tiny', style: 'margin:4px 0' }, i.description) : null,
+    ...attempts,
+    h('details', {}, h('summary', {}, 'Log attempt / change status'),
+      h('div', { style: 'margin-top:6px' }, desc, h('div', { class: 'row' }, outcome,
+        h('button', { class: 'small', onclick: guard(async () => {
+          if (!desc.value.trim()) return toast('Describe the step first');
+          await api(`/api/tickets/${t.id}/resolutions`, { method: 'POST', body: { description: desc.value, outcome: outcome.value } });
+          await refreshHistory();
+        }) }, 'Add attempt')),
+        h('button', { class: 'small ghost', style: 'margin-top:6px', onclick: guard(async () => {
+          await api(`/api/tickets/${t.id}`, { method: 'PATCH', body: { status: 'escalated' } }); await refreshHistory();
+        }) }, 'Escalate ticket'))));
+}
+function resetChat() {
+  conversationId = null; $('#chat').replaceChildren(h('div', { class: 'sys' }, 'New conversation — nothing said yet.'));
+  $('#convInfo').textContent = ''; $('#memory').textContent = 'Send a message to see which history was retrieved.';
+}
+function addMsg(role, text) { $('#chat').append(h('div', { class: 'msg ' + role }, text)); $('#chat').scrollTop = 1e9; }
+
+async function send() {
+  if (!customerId) return toast('Select a customer first');
+  const text = $('#msg').value.trim(); if (!text) return;
+  $('#msg').value = ''; addMsg('user', text); $('#sendBtn').disabled = true;
+  try {
+    const d = await api('/api/chat', { method: 'POST', body: { customer_id: customerId, message: text, conversation_id: conversationId } });
+    conversationId = d.conversation_id; addMsg('assistant', d.reply);
+    $('#convInfo').textContent = ` conversation ${d.conversation_id} · ${d.mode}`;
+    renderMemory(d.context_used); await refreshHistory();
+  } finally { $('#sendBtn').disabled = false; }
+}
+function node(label, text, extra) { return h('div', { class: 'node' }, h('b', {}, label), text, extra || null); }
+function renderMemory(c) {
+  const box = $('#memory'); box.replaceChildren();
+  const p = c.primary;
+  if (!p) {
+    box.append(h('div', {}, 'No specific past issue matched this message.'),
+      h('div', { class: 'tiny muted' }, `Earlier conversations on file: ${c.past_conversations}`)); return;
+  }
+  const arrow = () => h('span', { class: 'arrow' }, '→');
+  const chain = h('div', { class: 'chain' },
+    node('Customer', c.customer.name), arrow(),
+    node('Product', (p.product || {}).name || '?'), arrow(),
+    node('Issue', p.issue.title, h('div', {}, badge(p.issue.status))), arrow(),
+    node('Ticket', p.ticket.number, h('div', {}, badge(p.ticket.status))), arrow(),
+    node('Resolutions', `${p.resolutions.length} attempted`));
+  box.append(chain,
+    ...p.resolutions.map(r => h('div', { class: 'attempt ' + r.outcome }, `${r.description} — `, h('b', {}, r.outcome))),
+    h('div', { class: 'tiny muted', style: 'margin-top:8px' }, 'Relevance ranking: ' +
+      c.ranked.map(r => `${r.title} (${r.score})`).join('  ·  ')),
+    h('div', { class: 'tiny muted' }, `Earlier conversations on file: ${c.past_conversations}`));
+}
+
+$('#sendBtn').onclick = guard(send);
+$('#msg').addEventListener('keydown', e => { if (e.key === 'Enter') guard(send)(); });
+$('#newConv').onclick = () => resetChat();
+$('#customerSelect').onchange = guard(e => selectCustomer(e.target.value || null));
+$('#addCustomer').onclick = guard(async () => {
+  const c = await api('/api/customers', { method: 'POST', body: { name: $('#newName').value, email: $('#newEmail').value } });
+  $('#newName').value = $('#newEmail').value = ''; await loadCustomers(c.id);
+});
+$('#addProduct').onclick = guard(async () => {
+  if (!customerId) return toast('Select a customer first');
+  await api(`/api/customers/${customerId}/products`, { method: 'POST', body: { name: $('#prodName').value, category: $('#prodCat').value } });
+  $('#prodName').value = $('#prodCat').value = ''; await refreshHistory();
+});
+$('#reportBtn').onclick = guard(async () => {
+  if (!customerId) return toast('Select a customer first');
+  if (!$('#issueProduct').value) return toast('Add a product first');
+  await api('/api/issues', { method: 'POST', body: { customer_id: customerId, product_id: $('#issueProduct').value,
+    title: $('#issueTitle').value, description: $('#issueDesc').value, priority: $('#issuePriority').value } });
+  $('#issueTitle').value = $('#issueDesc').value = ''; toast('Issue and ticket stored in Neo4j'); await refreshHistory();
+});
+$('#seedBtn').onclick = guard(async () => { const d = await api('/api/demo/seed', { method: 'POST' });
+  toast(d.created ? 'Demo data loaded' : 'Demo customer already exists'); await loadCustomers(d.customer.id); });
+
+loadHealth(); loadCustomers().catch(e => toast(e.message)); resetChat();
+</script>
+</body>
+</html>
